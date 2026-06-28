@@ -65,6 +65,7 @@ public final class AppContext {
                     relationalRepo = new AzureSqlAppointmentRepository(
                             env("SQL_HOST", ""),
                             env("SQL_DATABASE", "clinicdb"),
+                            env("SQL_AUTHENTICATION", "SqlPassword"),
                             env("SQL_USER", ""),
                             env("SQL_PASSWORD", ""));
                 }

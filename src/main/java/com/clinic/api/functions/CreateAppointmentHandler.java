@@ -40,13 +40,18 @@ public class CreateAppointmentHandler {
             if (req.insuredId == null || req.insuredId.isBlank()
                     || req.scheduleId < 1
                     || req.countryISO == null
-                    || !(req.countryISO.equals("PE") || req.countryISO.equals("CL"))) {
+                    || !CountryISO.isSupported(req.countryISO)) {
                 return ApiResponse.error(request, HttpStatus.BAD_REQUEST,
-                        "Invalid request: insuredId, scheduleId>=1 and countryISO in [PE,CL] are required");
+                        "Invalid request: insuredId, scheduleId>=1 and countryISO in ["
+                                + CountryISO.supportedValues() + "] are required");
             }
 
             Appointment appointment = AppContext.createAppointment()
                     .execute(req.insuredId, req.scheduleId, CountryISO.valueOf(req.countryISO));
+            context.getLogger().info(String.format(
+                    "appointment.accepted appointmentId=%s insuredId=%s countryISO=%s invocationId=%s",
+                    appointment.getAppointmentId(), appointment.getInsuredId(),
+                    appointment.getCountryISO().name(), context.getInvocationId()));
             return ApiResponse.accepted(request, CreateAppointmentResponse.received(appointment.getAppointmentId()));
 
         } catch (Exception e) {

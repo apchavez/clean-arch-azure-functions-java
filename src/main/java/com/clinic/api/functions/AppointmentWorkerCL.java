@@ -1,6 +1,7 @@
 package com.clinic.api.functions;
 
 import com.microsoft.azure.functions.ExecutionContext;
+import com.microsoft.azure.functions.annotation.FixedDelayRetry;
 import com.microsoft.azure.functions.annotation.FunctionName;
 import com.microsoft.azure.functions.annotation.ServiceBusTopicTrigger;
 
@@ -11,6 +12,7 @@ public class AppointmentWorkerCL extends AppointmentWorkerBase {
     protected String country() { return "CL"; }
 
     @FunctionName("appointmentWorkerCL")
+    @FixedDelayRetry(maxRetryCount = 3, delayInterval = "00:00:10")
     public void run(
             @ServiceBusTopicTrigger(
                     name = "message",

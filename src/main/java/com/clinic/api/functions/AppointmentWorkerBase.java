@@ -22,9 +22,14 @@ abstract class AppointmentWorkerBase {
             // Routing is enforced at the Service Bus subscription level (SQL filter on sys.Subject).
             // This worker only receives messages already filtered for its country.
             String appointmentId = node.path("appointmentId").asText();
-            context.getLogger().info("[" + country() + "] Processing appointment " + appointmentId);
+            String correlationId = node.path("correlationId").asText(appointmentId);
+            context.getLogger().info(String.format(
+                    "appointment.processing countryISO=%s appointmentId=%s correlationId=%s invocationId=%s",
+                    country(), appointmentId, correlationId, context.getInvocationId()));
             AppContext.processAppointment().execute(appointmentId);
-            context.getLogger().info("[" + country() + "] Completed appointment " + appointmentId);
+            context.getLogger().info(String.format(
+                    "appointment.completed countryISO=%s appointmentId=%s correlationId=%s invocationId=%s",
+                    country(), appointmentId, correlationId, context.getInvocationId()));
         } catch (Exception e) {
             context.getLogger().severe("[" + country() + "] Error processing message: " + e.getMessage());
             throw new RuntimeException(e); // let Service Bus retry / dead-letter

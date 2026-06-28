@@ -61,4 +61,12 @@ class CreateAppointmentUseCaseTest {
         // Completing twice must fail (idempotency / invariant).
         assertThrows(IllegalStateException.class, a::markCompleted);
     }
+
+    @Test
+    void supportedCountriesAreCentralizedInDomain() {
+        assertTrue(CountryISO.isSupported("PE"));
+        assertTrue(CountryISO.isSupported("CL"));
+        assertFalse(CountryISO.isSupported("BR"));
+        assertEquals("PE,CL", CountryISO.supportedValues());
+    }
 }

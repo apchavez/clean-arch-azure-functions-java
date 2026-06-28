@@ -25,12 +25,20 @@ public class AzureSqlAppointmentRepository implements AppointmentRelationalRepos
 
     private final HikariDataSource dataSource;
 
-    public AzureSqlAppointmentRepository(String host, String database, String user, String password) {
+    public AzureSqlAppointmentRepository(String host, String database, String authentication, String user, String password) {
         HikariConfig cfg = new HikariConfig();
-        cfg.setJdbcUrl("jdbc:sqlserver://" + host + ":1433;database=" + database
-                + ";encrypt=true;trustServerCertificate=false;loginTimeout=30;");
-        cfg.setUsername(user);
-        cfg.setPassword(password);
+        String authMode = authentication == null || authentication.isBlank()
+                ? "SqlPassword"
+                : authentication;
+        String jdbcUrl = "jdbc:sqlserver://" + host + ":1433;database=" + database
+                + ";encrypt=true;trustServerCertificate=false;loginTimeout=30;";
+        if ("ActiveDirectoryManagedIdentity".equals(authMode)) {
+            jdbcUrl += "authentication=ActiveDirectoryManagedIdentity;";
+        } else {
+            cfg.setUsername(user);
+            cfg.setPassword(password);
+        }
+        cfg.setJdbcUrl(jdbcUrl);
         cfg.setMaximumPoolSize(5);
         cfg.setConnectionTimeout(30_000);
         cfg.setPoolName("clinic-sql-pool");

@@ -35,6 +35,9 @@ public class GetAppointmentsHandler {
                         "insuredId path parameter is required");
             }
             List<Appointment> appointments = AppContext.getAppointments().byInsured(insuredId);
+            context.getLogger().info(String.format(
+                    "appointments.queried insuredId=%s count=%d invocationId=%s",
+                    insuredId, appointments.size(), context.getInvocationId()));
             return ApiResponse.ok(request, appointments);
         } catch (Exception e) {
             context.getLogger().severe("Error querying appointments: " + e.getMessage());

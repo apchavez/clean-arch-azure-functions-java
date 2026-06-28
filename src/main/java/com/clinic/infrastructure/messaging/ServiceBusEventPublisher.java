@@ -9,6 +9,8 @@ import com.clinic.domain.ports.AppointmentEventPublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import java.time.Instant;
+
 /**
  * Service Bus adapter implementing the event publisher port.
  * Azure equivalent of the AWS project's SNS+SQS / EventBridge publishing.
@@ -48,12 +50,17 @@ public class ServiceBusEventPublisher implements AppointmentEventPublisher {
             ObjectNode node = MAPPER.createObjectNode()
                     .put("eventType", "APPOINTMENT_CREATED")
                     .put("appointmentId", a.getAppointmentId())
+                    .put("correlationId", a.getAppointmentId())
                     .put("insuredId", a.getInsuredId())
                     .put("scheduleId", a.getScheduleId())
-                    .put("countryISO", a.getCountryISO().name());
+                    .put("countryISO", a.getCountryISO().name())
+                    .put("occurredAt", Instant.now().toString());
             ServiceBusMessage message = new ServiceBusMessage(MAPPER.writeValueAsString(node));
             // Subject lets subscribers filter by country (PE / CL) at the subscription level.
             message.setSubject(a.getCountryISO().name());
+            message.setCorrelationId(a.getAppointmentId());
+            message.getApplicationProperties().put("eventType", "APPOINTMENT_CREATED");
+            message.getApplicationProperties().put("countryISO", a.getCountryISO().name());
             createdSender.sendMessage(message);
         } catch (Exception e) {
             throw new RuntimeException("Failed to publish APPOINTMENT_CREATED event", e);
@@ -66,8 +73,16 @@ public class ServiceBusEventPublisher implements AppointmentEventPublisher {
             ObjectNode node = MAPPER.createObjectNode()
                     .put("eventType", "APPOINTMENT_COMPLETED")
                     .put("appointmentId", a.getAppointmentId())
-                    .put("insuredId", a.getInsuredId());
-            completedSender.sendMessage(new ServiceBusMessage(MAPPER.writeValueAsString(node)));
+                    .put("correlationId", a.getAppointmentId())
+                    .put("insuredId", a.getInsuredId())
+                    .put("countryISO", a.getCountryISO().name())
+                    .put("occurredAt", Instant.now().toString());
+            ServiceBusMessage message = new ServiceBusMessage(MAPPER.writeValueAsString(node));
+            message.setSubject(a.getCountryISO().name());
+            message.setCorrelationId(a.getAppointmentId());
+            message.getApplicationProperties().put("eventType", "APPOINTMENT_COMPLETED");
+            message.getApplicationProperties().put("countryISO", a.getCountryISO().name());
+            completedSender.sendMessage(message);
         } catch (Exception e) {
             throw new RuntimeException("Failed to publish APPOINTMENT_COMPLETED event", e);
         }

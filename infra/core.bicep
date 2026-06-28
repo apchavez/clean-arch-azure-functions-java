@@ -8,6 +8,7 @@ param projectName string
 param environment string
 param location string
 param tags object
+@minLength(3)
 param suffix string
 
 @secure()
@@ -22,6 +23,38 @@ param sqlLocation string = 'westus3'
 @description('Region for the App Service plan + Function App.')
 param appLocation string = 'centralus'
 
+@description('Deploy Azure API Management in front of the Function App. Disabled by default to avoid extra cost.')
+param deployApiManagement bool = false
+
+@description('Publisher email required by API Management.')
+param apiManagementPublisherEmail string = 'platform@example.com'
+
+@description('Publisher name required by API Management.')
+param apiManagementPublisherName string = 'Clinic Platform'
+
+@description('Enable APIM JWT validation policy.')
+param enableApiManagementJwtValidation bool = false
+
+@description('OpenID Connect metadata URL used by APIM validate-jwt policy.')
+param apiManagementJwtOpenIdConfigUrl string = ''
+
+@description('Expected JWT audience used by APIM validate-jwt policy.')
+param apiManagementJwtAudience string = ''
+
+@description('Deploy Azure Monitor action group and alerts.')
+param deployAlerts bool = false
+
+@description('Email receiver for Azure Monitor alerts.')
+param alertEmail string = ''
+
+@description('Allow public network access to cloud data services. Keep true unless private networking is configured.')
+param allowPublicNetworkAccess bool = true
+
+var sqlServerHost = '${sqlServer.name}${az.environment().suffixes.sqlServerHostname}'
+var deployJwtPolicy = deployApiManagement && enableApiManagementJwtValidation && !empty(apiManagementJwtOpenIdConfigUrl) && !empty(apiManagementJwtAudience)
+var deployEmailAlerts = deployAlerts && !empty(alertEmail)
+var publicNetworkAccess = allowPublicNetworkAccess ? 'Enabled' : 'Disabled'
+
 // --- Cosmos DB (state tracking, serverless) ---
 resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
   name: 'cosmos-${projectName}-${environment}-${suffix}'
@@ -33,6 +66,7 @@ resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
     capabilities: [ { name: 'EnableServerless' } ]
     consistencyPolicy: { defaultConsistencyLevel: 'Session' }
     locations: [ { locationName: location, failoverPriority: 0 } ]
+    publicNetworkAccess: publicNetworkAccess
   }
 }
 
@@ -59,7 +93,10 @@ resource sb 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' = {
   location: location
   tags: tags
   sku: { name: 'Standard', tier: 'Standard' }
-  properties: { minimumTlsVersion: '1.2' }
+  properties: {
+    minimumTlsVersion: '1.2'
+    publicNetworkAccess: publicNetworkAccess
+  }
 }
 
 resource createdTopic 'Microsoft.ServiceBus/namespaces/topics@2022-10-01-preview' = {
@@ -151,6 +188,149 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   properties: { Application_Type: 'web', WorkspaceResourceId: log.id }
 }
 
+resource observabilityWorkbook 'Microsoft.Insights/workbooks@2022-04-01' = {
+  name: guid(resourceGroup().id, 'clinic-observability-workbook')
+  location: location
+  tags: tags
+  kind: 'shared'
+  properties: {
+    displayName: 'Clinic ${environment} - Observability'
+    category: 'workbook'
+    sourceId: log.id
+    serializedData: string({
+      version: 'Notebook/1.0'
+      items: [
+        {
+          type: 1
+          content: {
+            json: '# Clinic Scheduling Observability\n\nOperational view for appointment lifecycle, API latency and worker failures.'
+          }
+          name: 'title'
+        }
+        {
+          type: 3
+          content: {
+            version: 'KqlItem/1.0'
+            query: 'traces | where message has_any ("appointment.accepted", "appointment.processing", "appointment.completed") | extend appointmentId = extract("appointmentId=([^ ]+)", 1, message), countryISO = extract("countryISO=([^ ]+)", 1, message) | project timestamp, message, appointmentId, countryISO, operation_Id | order by timestamp desc'
+            size: 0
+            title: 'Appointment lifecycle'
+            queryType: 0
+            resourceType: 'microsoft.operationalinsights/workspaces'
+          }
+          name: 'appointment-lifecycle'
+        }
+        {
+          type: 3
+          content: {
+            version: 'KqlItem/1.0'
+            query: 'requests | summarize count(), avg(duration), percentile(duration, 95) by name, resultCode | order by name asc'
+            size: 0
+            title: 'API latency and status codes'
+            queryType: 0
+            resourceType: 'microsoft.operationalinsights/workspaces'
+          }
+          name: 'api-latency'
+        }
+        {
+          type: 3
+          content: {
+            version: 'KqlItem/1.0'
+            query: 'traces | where severityLevel >= 3 | project timestamp, message, operation_Id | order by timestamp desc'
+            size: 0
+            title: 'Failures'
+            queryType: 0
+            resourceType: 'microsoft.operationalinsights/workspaces'
+          }
+          name: 'failures'
+        }
+      ]
+    })
+  }
+}
+
+resource alertActionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = if (deployEmailAlerts) {
+  name: 'ag-${projectName}-${environment}'
+  location: 'global'
+  tags: tags
+  properties: {
+    groupShortName: 'clinic${environment}'
+    enabled: true
+    emailReceivers: [
+      {
+        name: 'primary'
+        emailAddress: alertEmail
+        useCommonAlertSchema: true
+      }
+    ]
+  }
+}
+
+resource function5xxAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (deployEmailAlerts) {
+  name: 'alert-${projectName}-${environment}-function-5xx'
+  location: 'global'
+  tags: tags
+  properties: {
+    description: 'Triggers when the Function App returns HTTP 5xx responses.'
+    severity: 2
+    enabled: true
+    scopes: [ functionApp.id ]
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT5M'
+    criteria: {
+      'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
+      allOf: [
+        {
+          name: 'Http5xx'
+          metricName: 'Http5xx'
+          metricNamespace: 'Microsoft.Web/sites'
+          operator: 'GreaterThanOrEqual'
+          threshold: 1
+          timeAggregation: 'Total'
+          criterionType: 'StaticThresholdCriterion'
+        }
+      ]
+    }
+    actions: [
+      {
+        actionGroupId: alertActionGroup.id
+      }
+    ]
+  }
+}
+
+resource functionLatencyAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (deployEmailAlerts) {
+  name: 'alert-${projectName}-${environment}-function-latency'
+  location: 'global'
+  tags: tags
+  properties: {
+    description: 'Triggers when average Function App response time is above two seconds.'
+    severity: 3
+    enabled: true
+    scopes: [ functionApp.id ]
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT5M'
+    criteria: {
+      'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
+      allOf: [
+        {
+          name: 'HttpResponseTime'
+          metricName: 'HttpResponseTime'
+          metricNamespace: 'Microsoft.Web/sites'
+          operator: 'GreaterThan'
+          threshold: 2
+          timeAggregation: 'Average'
+          criterionType: 'StaticThresholdCriterion'
+        }
+      ]
+    }
+    actions: [
+      {
+        actionGroupId: alertActionGroup.id
+      }
+    ]
+  }
+}
+
 // --- Storage (Functions runtime) ---
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: take('st${projectName}${environment}${suffix}', 24)
@@ -158,7 +338,13 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   tags: tags
   sku: { name: 'Standard_LRS' }
   kind: 'StorageV2'
-  properties: { minimumTlsVersion: 'TLS1_2', allowBlobPublicAccess: false, supportsHttpsTrafficOnly: true, allowSharedKeyAccess: false }
+  properties: {
+    minimumTlsVersion: 'TLS1_2'
+    allowBlobPublicAccess: false
+    supportsHttpsTrafficOnly: true
+    allowSharedKeyAccess: false
+    publicNetworkAccess: publicNetworkAccess
+  }
 }
 
 // --- Azure SQL Database (final relational persistence) ---
@@ -174,7 +360,7 @@ resource sqlServer 'Microsoft.Sql/servers@2023-08-01-preview' = {
     administratorLogin: sqlAdminUser
     administratorLoginPassword: sqlAdminPassword
     minimalTlsVersion: '1.2'
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: publicNetworkAccess
   }
 }
 
@@ -204,6 +390,7 @@ resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
+    publicNetworkAccess: publicNetworkAccess
   }
 }
 
@@ -258,12 +445,89 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'SERVICEBUS_CREATED_TOPIC', value: 'appointment-created' }
         { name: 'SERVICEBUS_COMPLETED_TOPIC', value: 'appointment-completed' }
         // SQL: password via Key Vault reference — never stored in plain config
-        { name: 'SQL_HOST', value: '${sqlServer.name}.database.windows.net' }
+        { name: 'SQL_HOST', value: sqlServerHost }
         { name: 'SQL_DATABASE', value: 'clinicdb' }
+        { name: 'SQL_AUTHENTICATION', value: 'SqlPassword' }
         { name: 'SQL_USER', value: sqlAdminUser }
         { name: 'SQL_PASSWORD', value: '@Microsoft.KeyVault(VaultName=${kv.name};SecretName=sql-admin-password)' }
       ]
     }
+  }
+}
+
+// --- Optional API Management facade ---
+// Consumption keeps this portfolio-friendly while demonstrating auth/throttling/versioning readiness.
+resource apiManagement 'Microsoft.ApiManagement/service@2023-09-01-preview' = if (deployApiManagement) {
+  name: 'apim-${projectName}-${environment}-${suffix}'
+  location: location
+  tags: tags
+  sku: {
+    name: 'Consumption'
+    capacity: 0
+  }
+  properties: {
+    publisherEmail: apiManagementPublisherEmail
+    publisherName: apiManagementPublisherName
+  }
+}
+
+resource appointmentsApi 'Microsoft.ApiManagement/service/apis@2023-09-01-preview' = if (deployApiManagement) {
+  parent: apiManagement
+  name: 'clinic-appointments'
+  properties: {
+    displayName: 'Clinic Appointments API'
+    path: 'clinic'
+    protocols: [ 'https' ]
+    serviceUrl: 'https://${functionApp.name}.azurewebsites.net/api'
+    subscriptionRequired: false
+  }
+}
+
+resource createAppointmentOperation 'Microsoft.ApiManagement/service/apis/operations@2023-09-01-preview' = if (deployApiManagement) {
+  parent: appointmentsApi
+  name: 'create-appointment'
+  properties: {
+    displayName: 'Create appointment'
+    method: 'POST'
+    urlTemplate: '/appointments'
+    responses: [
+      { statusCode: 202, description: 'Appointment accepted for asynchronous processing' }
+      { statusCode: 400, description: 'Invalid request' }
+      { statusCode: 500, description: 'Internal server error' }
+    ]
+  }
+}
+
+resource getAppointmentsOperation 'Microsoft.ApiManagement/service/apis/operations@2023-09-01-preview' = if (deployApiManagement) {
+  parent: appointmentsApi
+  name: 'get-appointments'
+  properties: {
+    displayName: 'Get appointments by insured'
+    method: 'GET'
+    urlTemplate: '/appointments/{insuredId}'
+    templateParameters: [
+      {
+        name: 'insuredId'
+        type: 'string'
+        required: true
+      }
+    ]
+    responses: [
+      { statusCode: 200, description: 'Appointments for the insured' }
+      { statusCode: 400, description: 'Missing insuredId' }
+      { statusCode: 500, description: 'Internal server error' }
+    ]
+  }
+}
+
+resource appointmentsApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2023-09-01-preview' = if (deployApiManagement) {
+  parent: appointmentsApi
+  name: 'policy'
+  properties: {
+    format: 'rawxml'
+    value: deployJwtPolicy
+      ? '<policies><inbound><base /><validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized"><openid-config url="${apiManagementJwtOpenIdConfigUrl}" /><audiences><audience>${apiManagementJwtAudience}</audience></audiences></validate-jwt><rate-limit-by-key calls="60" renewal-period="60" counter-key="@(context.Subscription?.Key ?? context.Request.IpAddress)" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+      : '<policies><inbound><base /><rate-limit-by-key calls="60" renewal-period="60" counter-key="@(context.Subscription?.Key ?? context.Request.IpAddress)" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
   }
 }
 
@@ -343,5 +607,6 @@ resource storageTableRole 'Microsoft.Authorization/roleAssignments@2022-04-01' =
 output functionAppName string = functionApp.name
 output cosmosAccountName string = cosmos.name
 output serviceBusNamespace string = sb.name
-output sqlServerHost string = '${sqlServer.name}.database.windows.net'
+output sqlServerHost string = sqlServerHost
 output keyVaultName string = kv.name
+output apiManagementGatewayUrl string = deployApiManagement ? apiManagement!.properties.gatewayUrl : ''

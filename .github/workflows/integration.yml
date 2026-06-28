@@ -1,0 +1,44 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Function App or APIM base URL, for example https://func-clinic-dev.azurewebsites.net/api"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  postman:
+    name: Run Postman collection
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Newman
+        run: npm install --global newman
+
+      - name: Run collection
+        run: >
+          newman run postman/clinic-azure.postman_collection.json
+          --env-var baseUrl="${{ inputs.base_url }}"
+          --reporters cli,junit
+          --reporter-junit-export newman-results.xml
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: newman-results.xml
+          if-no-files-found: warn

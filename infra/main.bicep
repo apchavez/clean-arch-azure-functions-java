@@ -22,6 +22,33 @@ param sqlAdminPassword string
 @description('Region for the App Service plan + Function App (separate due to per-region App Service quota).')
 param appLocation string = 'centralus'
 
+@description('Deploy Azure API Management in front of the Function App. Disabled by default to keep portfolio deployments low-cost.')
+param deployApiManagement bool = false
+
+@description('Publisher email required by API Management when deployApiManagement=true.')
+param apiManagementPublisherEmail string = 'platform@example.com'
+
+@description('Publisher name required by API Management when deployApiManagement=true.')
+param apiManagementPublisherName string = 'Clinic Platform'
+
+@description('Enable APIM JWT validation policy. Requires deployApiManagement=true and valid JWT settings.')
+param enableApiManagementJwtValidation bool = false
+
+@description('OpenID Connect metadata URL used by APIM validate-jwt policy.')
+param apiManagementJwtOpenIdConfigUrl string = ''
+
+@description('Expected JWT audience used by APIM validate-jwt policy.')
+param apiManagementJwtAudience string = ''
+
+@description('Deploy Azure Monitor action group and alerts.')
+param deployAlerts bool = false
+
+@description('Email receiver for Azure Monitor alerts.')
+param alertEmail string = ''
+
+@description('Allow public network access to cloud data services. Keep true unless private networking is configured.')
+param allowPublicNetworkAccess bool = true
+
 var tags = {
   project: projectName
   environment: environment
@@ -47,6 +74,15 @@ module core 'core.bicep' = {
     suffix: suffix
     sqlAdminPassword: sqlAdminPassword
     appLocation: appLocation
+    deployApiManagement: deployApiManagement
+    apiManagementPublisherEmail: apiManagementPublisherEmail
+    apiManagementPublisherName: apiManagementPublisherName
+    enableApiManagementJwtValidation: enableApiManagementJwtValidation
+    apiManagementJwtOpenIdConfigUrl: apiManagementJwtOpenIdConfigUrl
+    apiManagementJwtAudience: apiManagementJwtAudience
+    deployAlerts: deployAlerts
+    alertEmail: alertEmail
+    allowPublicNetworkAccess: allowPublicNetworkAccess
   }
 }
 
@@ -56,3 +92,4 @@ output cosmosAccountName string = core.outputs.cosmosAccountName
 output serviceBusNamespace string = core.outputs.serviceBusNamespace
 output sqlServerHost string = core.outputs.sqlServerHost
 output keyVaultName string = core.outputs.keyVaultName
+output apiManagementGatewayUrl string = core.outputs.apiManagementGatewayUrl

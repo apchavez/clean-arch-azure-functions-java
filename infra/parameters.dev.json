@@ -5,6 +5,7 @@
     "projectName": { "value": "clinic" },
     "location": { "value": "eastus" },
     "environment": { "value": "dev" },
+    "appLocation": { "value": "centralus" },
     "deployApiManagement": { "value": false },
     "deployAlerts": { "value": false },
     "allowPublicNetworkAccess": { "value": true }

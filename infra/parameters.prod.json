@@ -4,9 +4,10 @@
   "parameters": {
     "projectName": { "value": "clinic" },
     "location": { "value": "eastus" },
-    "environment": { "value": "dev" },
-    "deployApiManagement": { "value": false },
-    "deployAlerts": { "value": false },
+    "environment": { "value": "prod" },
+    "appLocation": { "value": "centralus" },
+    "deployApiManagement": { "value": true },
+    "deployAlerts": { "value": true },
     "allowPublicNetworkAccess": { "value": true }
   }
 }

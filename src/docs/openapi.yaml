@@ -5,6 +5,9 @@ info:
     API para la plataforma de agendamiento de citas médicas migrada a Azure.
     Expone dos endpoints HTTP; el procesamiento interno es event-driven vía Service Bus.
   version: 1.0.0
+  license:
+    name: MIT
+    url: https://opensource.org/license/mit
   contact:
     name: Clinic Platform Team
 
@@ -17,6 +20,8 @@ servers:
 tags:
   - name: Appointments
     description: Gestión de citas médicas
+
+security: []
 
 paths:
   /appointments:

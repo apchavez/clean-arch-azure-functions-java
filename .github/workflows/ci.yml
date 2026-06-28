@@ -2,26 +2,39 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
   pull_request:
-    branches: [main]
+    branches: [master, main]
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-test:
+  build:
+    name: Build, test and validate API
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Java 21
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
-          distribution: 'temurin'
+          distribution: temurin
+          java-version: "21"
           cache: maven
 
-      - name: Build, test and verify coverage
-        run: mvn --batch-mode clean verify
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build and test
+        run: mvn -B clean verify
+
+      - name: Validate OpenAPI contract
+        run: npx --yes @redocly/cli lint src/docs/openapi.yaml
 
       - name: Upload JaCoCo coverage report
         if: always()
@@ -29,3 +42,11 @@ jobs:
         with:
           name: jacoco-report
           path: target/site/jacoco/
+          if-no-files-found: warn
+
+      - name: Upload OpenAPI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinic-openapi
+          path: src/docs/openapi.yaml
+          if-no-files-found: error

@@ -96,6 +96,7 @@ GET /api/appointments/{insuredId}
 | `SERVICEBUS_COMPLETED_TOPIC`          | Nombre del topic de completado                       |
 | `SQL_HOST`                            | Host del servidor Azure SQL                          |
 | `SQL_DATABASE`                        | Nombre de la base de datos SQL                       |
+| `SQL_AUTHENTICATION`                  | `SqlPassword` o `ActiveDirectoryManagedIdentity`     |
 | `SQL_USER`                            | Usuario administrador SQL                            |
 | `SQL_PASSWORD`                        | Contraseña (Key Vault reference en producción)       |
 
@@ -148,4 +149,37 @@ curl https://<function-app>.azurewebsites.net/api/appointments/12345
 - HikariCP — pool de conexiones SQL (reutilizado entre invocaciones warm).
 - Workers PE/CL sin duplicación — `AppointmentWorkerBase` centraliza la lógica.
 - Cobertura de tests con JaCoCo (gate 80% en domain/application).
-- CI/CD con GitHub Actions en cada push a `main`.
+- CI/CD con GitHub Actions en cada push a `master` o `main`.
+
+---
+
+## Future Improvements
+
+Ruta incremental, ordenada de menor a mayor complejidad, para evolucionar el proyecto como pieza de portafolio:
+
+| Estado | Mejora | Objetivo |
+|--------|--------|----------|
+| Done | Documentar roadmap de mejoras futuras | Mostrar direccion tecnica clara en el portafolio. |
+| Done | CI con build, tests y validacion OpenAPI | Garantizar que cada push compile, ejecute pruebas y valide el contrato HTTP. |
+| Done | Publicar `openapi.yaml` como artifact de CI | Facilitar revision externa del contrato de API desde GitHub Actions. |
+| Done | Observabilidad estructurada | Agregar correlation IDs, logs consistentes y metricas por flujo de cita. |
+| Done | Manejo avanzado de retries y dead-letter | Documentar y exponer operacion de fallos de Service Bus. |
+| Done | API Management opcional | Agregar una fachada APIM activable para gobierno de API. |
+| Done | Managed Identity para Azure SQL | Adaptador JDBC listo para `ActiveDirectoryManagedIdentity`; requiere crear usuario contenido en la base. |
+| Done | Soporte escalable para mas paises | Centralizar paises soportados en el dominio para evitar validaciones hardcodeadas. |
+| Done | Pruebas de integracion cloud/local | Workflow manual con Newman contra Function App o APIM desplegado. |
+| Done | Load testing y performance baselines | Medir cold starts, throughput de Service Bus y uso del pool SQL. |
+
+---
+
+## Portfolio Enhancements
+
+| Estado | Mejora | Referencia |
+|--------|--------|------------|
+| Done | Deploy manual por GitHub Actions con OIDC | `.github/workflows/deploy.yml` |
+| Done | Ambientes separados `dev`, `test`, `prod` | `infra/parameters.*.json` |
+| Done | APIM con throttling y JWT opcional | `infra/core.bicep`, `docs/deployment.md` |
+| Done | Alertas operativas opcionales | `infra/core.bicep`, `docs/deployment.md` |
+| Done | Workbook de observabilidad | `infra/core.bicep` |
+| Done | Hardening de red parametrizable | `allowPublicNetworkAccess` en Bicep |
+| Done | Guia operativa y de despliegue | `docs/operations.md`, `docs/deployment.md` |
