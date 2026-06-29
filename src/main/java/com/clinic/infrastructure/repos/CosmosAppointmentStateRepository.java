@@ -14,10 +14,13 @@ import com.azure.identity.DefaultAzureCredentialBuilder;
 import com.clinic.domain.entities.Appointment;
 import com.clinic.domain.ports.AppointmentStateRepository;
 import com.clinic.domain.shared.Page;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.retry.Retry;
 
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Cosmos DB adapter implementing the state repository port.
@@ -31,71 +34,90 @@ import java.util.Optional;
 public class CosmosAppointmentStateRepository implements AppointmentStateRepository {
 
     private final CosmosContainer container;
+    private final Retry retry;
+    private final CircuitBreaker circuitBreaker;
 
-    public CosmosAppointmentStateRepository(String endpoint,
-                                            String databaseName, String containerName) {
+    public CosmosAppointmentStateRepository(String endpoint, String databaseName,
+                                            String containerName,
+                                            Retry retry, CircuitBreaker circuitBreaker) {
         CosmosClient client = new CosmosClientBuilder()
                 .endpoint(endpoint)
                 .credential(new DefaultAzureCredentialBuilder().build())
                 .buildClient();
         this.container = client.getDatabase(databaseName).getContainer(containerName);
+        this.retry = retry;
+        this.circuitBreaker = circuitBreaker;
     }
 
     @Override
     public void save(Appointment appointment) {
-        container.createItem(toItem(appointment));
+        resilient(() -> container.createItem(toItem(appointment)));
     }
 
     @Override
     public Optional<Appointment> findById(String appointmentId) {
-        try {
-            AppointmentItem item = container
-                    .readItem(appointmentId, new PartitionKey(appointmentId), AppointmentItem.class)
-                    .getItem();
-            return Optional.of(toDomain(item));
-        } catch (CosmosException e) {
-            if (e.getStatusCode() == 404) {
-                return Optional.empty();
+        return resilient(() -> {
+            try {
+                AppointmentItem item = container
+                        .readItem(appointmentId, new PartitionKey(appointmentId), AppointmentItem.class)
+                        .getItem();
+                return Optional.of(toDomain(item));
+            } catch (CosmosException e) {
+                if (e.getStatusCode() == 404) {
+                    return Optional.empty();
+                }
+                throw new RuntimeException("Cosmos read failed (status " + e.getStatusCode() + "): " + e.getMessage(), e);
             }
-            throw new RuntimeException("Cosmos read failed (status " + e.getStatusCode() + "): " + e.getMessage(), e);
-        }
+        });
     }
 
     @Override
     public List<Appointment> findByInsuredId(String insuredId) {
-        SqlQuerySpec spec = new SqlQuerySpec(
-                "SELECT * FROM c WHERE c.insuredId = @insuredId",
-                new SqlParameter("@insuredId", insuredId));
-        return container.queryItems(spec, new CosmosQueryRequestOptions(), AppointmentItem.class)
-                .stream()
-                .map(this::toDomain)
-                .toList();
+        return resilient(() -> {
+            SqlQuerySpec spec = new SqlQuerySpec(
+                    "SELECT * FROM c WHERE c.insuredId = @insuredId",
+                    new SqlParameter("@insuredId", insuredId));
+            return container.queryItems(spec, new CosmosQueryRequestOptions(), AppointmentItem.class)
+                    .stream()
+                    .map(this::toDomain)
+                    .toList();
+        });
     }
 
     @Override
     public Page<Appointment> findByInsuredId(String insuredId, int pageSize, String continuationToken) {
-        SqlQuerySpec spec = new SqlQuerySpec(
-                "SELECT * FROM c WHERE c.insuredId = @insuredId",
-                new SqlParameter("@insuredId", insuredId));
-        CosmosPagedIterable<AppointmentItem> paged =
-                container.queryItems(spec, new CosmosQueryRequestOptions(), AppointmentItem.class);
-        Iterator<FeedResponse<AppointmentItem>> pages =
-                paged.iterableByPage(continuationToken, pageSize).iterator();
-        if (!pages.hasNext()) {
-            return new Page<>(List.of(), null);
-        }
-        FeedResponse<AppointmentItem> feedPage = pages.next();
-        List<Appointment> items = feedPage.getResults().stream().map(this::toDomain).toList();
-        return new Page<>(items, feedPage.getContinuationToken());
+        return resilient(() -> {
+            SqlQuerySpec spec = new SqlQuerySpec(
+                    "SELECT * FROM c WHERE c.insuredId = @insuredId",
+                    new SqlParameter("@insuredId", insuredId));
+            CosmosPagedIterable<AppointmentItem> paged =
+                    container.queryItems(spec, new CosmosQueryRequestOptions(), AppointmentItem.class);
+            Iterator<FeedResponse<AppointmentItem>> pages =
+                    paged.iterableByPage(continuationToken, pageSize).iterator();
+            if (!pages.hasNext()) {
+                return new Page<>(List.of(), null);
+            }
+            FeedResponse<AppointmentItem> feedPage = pages.next();
+            List<Appointment> items = feedPage.getResults().stream().map(this::toDomain).toList();
+            return new Page<>(items, feedPage.getContinuationToken());
+        });
     }
 
     @Override
     public void updateStatus(Appointment appointment) {
-        container.replaceItem(
+        resilient(() -> container.replaceItem(
                 toItem(appointment),
                 appointment.getAppointmentId(),
                 new PartitionKey(appointment.getAppointmentId()),
-                null);
+                null));
+    }
+
+    private <T> T resilient(Supplier<T> operation) {
+        return Retry.decorateSupplier(retry, circuitBreaker.decorateSupplier(operation)).get();
+    }
+
+    private void resilient(Runnable operation) {
+        resilient(() -> { operation.run(); return null; });
     }
 
     public String ping() {

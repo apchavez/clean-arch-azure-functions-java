@@ -4,12 +4,15 @@ import com.clinic.domain.entities.Appointment;
 import com.clinic.domain.ports.AppointmentRelationalRepository;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.retry.Retry;
 import org.flywaydb.core.Flyway;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.function.Supplier;
 
 /**
  * Azure SQL Database adapter implementing the relational persistence port.
@@ -24,8 +27,14 @@ import java.time.Instant;
 public class AzureSqlAppointmentRepository implements AppointmentRelationalRepository {
 
     private final HikariDataSource dataSource;
+    private final Retry retry;
+    private final CircuitBreaker circuitBreaker;
 
-    public AzureSqlAppointmentRepository(String host, String database, String authentication, String user, String password) {
+    public AzureSqlAppointmentRepository(String host, String database, String authentication,
+                                         String user, String password,
+                                         Retry retry, CircuitBreaker circuitBreaker) {
+        this.retry = retry;
+        this.circuitBreaker = circuitBreaker;
         HikariConfig cfg = new HikariConfig();
         String authMode = authentication == null || authentication.isBlank()
                 ? "SqlPassword"
@@ -56,33 +65,53 @@ public class AzureSqlAppointmentRepository implements AppointmentRelationalRepos
 
     @Override
     public void persist(Appointment a) {
-        String sql = """
-                MERGE appointments AS target
-                USING (SELECT ? AS appointment_id) AS source
-                ON target.appointment_id = source.appointment_id
-                WHEN MATCHED THEN
-                    UPDATE SET status = ?, completed_at = ?
-                WHEN NOT MATCHED THEN
-                    INSERT (appointment_id, insured_id, schedule_id, country_iso, status, created_at, completed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?);
-                """;
+        resilient(() -> {
+            String sql = """
+                    MERGE appointments AS target
+                    USING (SELECT ? AS appointment_id) AS source
+                    ON target.appointment_id = source.appointment_id
+                    WHEN MATCHED THEN
+                        UPDATE SET status = ?, completed_at = ?
+                    WHEN NOT MATCHED THEN
+                        INSERT (appointment_id, insured_id, schedule_id, country_iso, status, created_at, completed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?);
+                    """;
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(sql)) {
+
+                ps.setString(1, a.getAppointmentId());
+                ps.setString(2, a.getStatus().name());
+                ps.setTimestamp(3, toTs(a.getCompletedAt()));
+                ps.setString(4, a.getAppointmentId());
+                ps.setString(5, a.getInsuredId());
+                ps.setInt(6, a.getScheduleId());
+                ps.setString(7, a.getCountryISO().name());
+                ps.setString(8, a.getStatus().name());
+                ps.setTimestamp(9, toTs(a.getCreatedAt()));
+                ps.setTimestamp(10, toTs(a.getCompletedAt()));
+                ps.executeUpdate();
+
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to persist appointment to Azure SQL: " + e.getMessage(), e);
+            }
+        });
+    }
+
+    private <T> T resilient(Supplier<T> operation) {
+        return Retry.decorateSupplier(retry, circuitBreaker.decorateSupplier(operation)).get();
+    }
+
+    private void resilient(Runnable operation) {
+        resilient(() -> { operation.run(); return null; });
+    }
+
+    public String ping() {
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, a.getAppointmentId());
-            ps.setString(2, a.getStatus().name());
-            ps.setTimestamp(3, toTs(a.getCompletedAt()));
-            ps.setString(4, a.getAppointmentId());
-            ps.setString(5, a.getInsuredId());
-            ps.setInt(6, a.getScheduleId());
-            ps.setString(7, a.getCountryISO().name());
-            ps.setString(8, a.getStatus().name());
-            ps.setTimestamp(9, toTs(a.getCreatedAt()));
-            ps.setTimestamp(10, toTs(a.getCompletedAt()));
-            ps.executeUpdate();
-
+             PreparedStatement ps = conn.prepareStatement("SELECT 1")) {
+            ps.executeQuery();
+            return "UP";
         } catch (Exception e) {
-            throw new RuntimeException("Failed to persist appointment to Azure SQL: " + e.getMessage(), e);
+            return "DOWN: " + e.getMessage();
         }
     }
 

@@ -42,7 +42,9 @@ public final class AppContext {
                     stateRepo = new CosmosAppointmentStateRepository(
                             env("COSMOS_ENDPOINT", ""),
                             env("COSMOS_DATABASE", "clinicdb"),
-                            env("COSMOS_CONTAINER", "appointments"));
+                            env("COSMOS_CONTAINER", "appointments"),
+                            ResilienceConfig.exponentialRetry("cosmos"),
+                            ResilienceConfig.circuitBreaker("cosmos"));
                 }
             }
         }
@@ -57,7 +59,9 @@ public final class AppContext {
                             env("SERVICEBUS__fullyQualifiedNamespace", ""),
                             env("SERVICEBUS_CREATED_TOPIC", "appointment-created"),
                             env("SERVICEBUS_COMPLETED_TOPIC", "appointment-completed"),
-                            env("SERVICEBUS_CANCELLED_TOPIC", "appointment-cancelled"));
+                            env("SERVICEBUS_CANCELLED_TOPIC", "appointment-cancelled"),
+                            ResilienceConfig.exponentialRetry("servicebus"),
+                            ResilienceConfig.circuitBreaker("servicebus"));
                 }
             }
         }
@@ -73,7 +77,9 @@ public final class AppContext {
                             env("SQL_DATABASE", "clinicdb"),
                             env("SQL_AUTHENTICATION", "SqlPassword"),
                             env("SQL_USER", ""),
-                            env("SQL_PASSWORD", ""));
+                            env("SQL_PASSWORD", ""),
+                            ResilienceConfig.exponentialRetry("sql"),
+                            ResilienceConfig.circuitBreaker("sql"));
                 }
             }
         }

@@ -10,8 +10,11 @@ import com.clinic.domain.entities.Appointment;
 import com.clinic.domain.ports.AppointmentEventPublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.retry.Retry;
 
 import java.time.Instant;
+import java.util.function.Supplier;
 
 /**
  * Service Bus adapter implementing the event publisher port.
@@ -30,12 +33,18 @@ public class ServiceBusEventPublisher implements AppointmentEventPublisher {
     private final ServiceBusSenderClient cancelledSender;
     private final String fullyQualifiedNamespace;
     private final TokenCredential credential;
+    private final Retry retry;
+    private final CircuitBreaker circuitBreaker;
 
     public ServiceBusEventPublisher(String fullyQualifiedNamespace,
                                     String createdTopic,
                                     String completedTopic,
-                                    String cancelledTopic) {
+                                    String cancelledTopic,
+                                    Retry retry,
+                                    CircuitBreaker circuitBreaker) {
         this.fullyQualifiedNamespace = fullyQualifiedNamespace;
+        this.retry = retry;
+        this.circuitBreaker = circuitBreaker;
         this.credential = new DefaultAzureCredentialBuilder().build();
         this.createdSender = new ServiceBusClientBuilder()
                 .fullyQualifiedNamespace(fullyQualifiedNamespace)
@@ -72,66 +81,85 @@ public class ServiceBusEventPublisher implements AppointmentEventPublisher {
 
     @Override
     public void publishCreated(Appointment a) {
-        try {
-            ObjectNode node = MAPPER.createObjectNode()
-                    .put("eventType", "APPOINTMENT_CREATED")
-                    .put("appointmentId", a.getAppointmentId())
-                    .put("correlationId", a.getAppointmentId())
-                    .put("insuredId", a.getInsuredId())
-                    .put("scheduleId", a.getScheduleId())
-                    .put("countryISO", a.getCountryISO().name())
-                    .put("occurredAt", Instant.now().toString());
-            ServiceBusMessage message = new ServiceBusMessage(MAPPER.writeValueAsString(node));
-            // Subject lets subscribers filter by country (PE / CL) at the subscription level.
-            message.setSubject(a.getCountryISO().name());
-            message.setCorrelationId(a.getAppointmentId());
-            message.getApplicationProperties().put("eventType", "APPOINTMENT_CREATED");
-            message.getApplicationProperties().put("countryISO", a.getCountryISO().name());
-            createdSender.sendMessage(message);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to publish APPOINTMENT_CREATED event", e);
-        }
+        resilient(() -> {
+            try {
+                ObjectNode node = MAPPER.createObjectNode()
+                        .put("eventType", "APPOINTMENT_CREATED")
+                        .put("appointmentId", a.getAppointmentId())
+                        .put("correlationId", a.getAppointmentId())
+                        .put("insuredId", a.getInsuredId())
+                        .put("scheduleId", a.getScheduleId())
+                        .put("countryISO", a.getCountryISO().name())
+                        .put("occurredAt", Instant.now().toString());
+                ServiceBusMessage message = new ServiceBusMessage(MAPPER.writeValueAsString(node));
+                message.setSubject(a.getCountryISO().name());
+                message.setCorrelationId(a.getAppointmentId());
+                message.getApplicationProperties().put("eventType", "APPOINTMENT_CREATED");
+                message.getApplicationProperties().put("countryISO", a.getCountryISO().name());
+                createdSender.sendMessage(message);
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to publish APPOINTMENT_CREATED event", e);
+            }
+        });
     }
 
     @Override
     public void publishCompleted(Appointment a) {
-        try {
-            ObjectNode node = MAPPER.createObjectNode()
-                    .put("eventType", "APPOINTMENT_COMPLETED")
-                    .put("appointmentId", a.getAppointmentId())
-                    .put("correlationId", a.getAppointmentId())
-                    .put("insuredId", a.getInsuredId())
-                    .put("countryISO", a.getCountryISO().name())
-                    .put("occurredAt", Instant.now().toString());
-            ServiceBusMessage message = new ServiceBusMessage(MAPPER.writeValueAsString(node));
-            message.setSubject(a.getCountryISO().name());
-            message.setCorrelationId(a.getAppointmentId());
-            message.getApplicationProperties().put("eventType", "APPOINTMENT_COMPLETED");
-            message.getApplicationProperties().put("countryISO", a.getCountryISO().name());
-            completedSender.sendMessage(message);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to publish APPOINTMENT_COMPLETED event", e);
-        }
+        resilient(() -> {
+            try {
+                ObjectNode node = MAPPER.createObjectNode()
+                        .put("eventType", "APPOINTMENT_COMPLETED")
+                        .put("appointmentId", a.getAppointmentId())
+                        .put("correlationId", a.getAppointmentId())
+                        .put("insuredId", a.getInsuredId())
+                        .put("countryISO", a.getCountryISO().name())
+                        .put("occurredAt", Instant.now().toString());
+                ServiceBusMessage message = new ServiceBusMessage(MAPPER.writeValueAsString(node));
+                message.setSubject(a.getCountryISO().name());
+                message.setCorrelationId(a.getAppointmentId());
+                message.getApplicationProperties().put("eventType", "APPOINTMENT_COMPLETED");
+                message.getApplicationProperties().put("countryISO", a.getCountryISO().name());
+                completedSender.sendMessage(message);
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to publish APPOINTMENT_COMPLETED event", e);
+            }
+        });
     }
 
     @Override
     public void publishCancelled(Appointment a) {
-        try {
-            ObjectNode node = MAPPER.createObjectNode()
-                    .put("eventType", "APPOINTMENT_CANCELLED")
-                    .put("appointmentId", a.getAppointmentId())
-                    .put("correlationId", a.getAppointmentId())
-                    .put("insuredId", a.getInsuredId())
-                    .put("countryISO", a.getCountryISO().name())
-                    .put("occurredAt", Instant.now().toString());
-            ServiceBusMessage message = new ServiceBusMessage(MAPPER.writeValueAsString(node));
-            message.setSubject(a.getCountryISO().name());
-            message.setCorrelationId(a.getAppointmentId());
-            message.getApplicationProperties().put("eventType", "APPOINTMENT_CANCELLED");
-            message.getApplicationProperties().put("countryISO", a.getCountryISO().name());
-            cancelledSender.sendMessage(message);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to publish APPOINTMENT_CANCELLED event", e);
-        }
+        resilient(() -> {
+            try {
+                ObjectNode node = MAPPER.createObjectNode()
+                        .put("eventType", "APPOINTMENT_CANCELLED")
+                        .put("appointmentId", a.getAppointmentId())
+                        .put("correlationId", a.getAppointmentId())
+                        .put("insuredId", a.getInsuredId())
+                        .put("countryISO", a.getCountryISO().name())
+                        .put("occurredAt", Instant.now().toString());
+                ServiceBusMessage message = new ServiceBusMessage(MAPPER.writeValueAsString(node));
+                message.setSubject(a.getCountryISO().name());
+                message.setCorrelationId(a.getAppointmentId());
+                message.getApplicationProperties().put("eventType", "APPOINTMENT_CANCELLED");
+                message.getApplicationProperties().put("countryISO", a.getCountryISO().name());
+                cancelledSender.sendMessage(message);
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to publish APPOINTMENT_CANCELLED event", e);
+            }
+        });
+    }
+
+    private <T> T resilient(Supplier<T> operation) {
+        return Retry.decorateSupplier(retry, circuitBreaker.decorateSupplier(operation)).get();
+    }
+
+    private void resilient(Runnable operation) {
+        resilient(() -> { operation.run(); return null; });
     }
 }
