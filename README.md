@@ -2,53 +2,76 @@
 
 # Clinic Scheduling Platform — Azure (Java 21)
 
-Migración a **Azure** de la plataforma de citas médicas originalmente construida en **AWS** (`clinic-scheduling-platform`, TypeScript). Misma **lógica de negocio** y misma **Clean Architecture**, reescrita en **Java 21** sobre Azure Functions.
+Migración a **Azure** de la plataforma de citas médicas originalmente construida en **AWS** ([clinic-scheduling-platform](https://github.com/apchavez/clinic-scheduling-platform), TypeScript). Misma lógica de negocio y misma Clean Architecture, reescrita en Java 21 sobre Azure Functions.
 
-> Objetivo: demostrar que los patrones serverless y event-driven son portables entre nubes. Lo que cambia es la capa de infraestructura; el dominio permanece intacto.
+> El dominio no conoce Azure. Lo que cambia entre nubes es únicamente la capa de infraestructura; los casos de uso y entidades permanecen intactos.
+
+> **Sin costos en reposo** — el CI solo compila y ejecuta tests. Ningún recurso Azure se aprovisiona hasta ejecutar el workflow de deploy manualmente.
+
+---
+
+## Tecnologías
+
+| Categoría | Tecnología |
+|---|---|
+| Lenguaje / Runtime | Java 21, Azure Functions v4 |
+| Estado (NoSQL) | Cosmos DB serverless (Managed Identity) |
+| Persistencia relacional | Azure SQL Database (HikariCP, Flyway) |
+| Mensajería | Service Bus topics + subscriptions (Managed Identity) |
+| Notificaciones | Azure Communication Services Email |
+| Resiliencia | Resilience4j — circuit breaker + retry exponencial |
+| IaC | Bicep (suscripción-level deployment) |
+| Seguridad | Managed Identity, Key Vault references, HTTPS-only |
+| Observabilidad | Application Insights, correlation IDs, logs estructurados |
+| Documentación API | OpenAPI 3.0 (validado en CI con Redocly) |
+| Build / Tests | Maven, JUnit 5, JaCoCo (gate 80 % en domain + application) |
+| CI/CD | GitHub Actions (CI automático, deploy/destroy manuales) |
 
 ---
 
 ## Mapeo AWS → Azure
 
-| AWS (proyecto original)   | Azure (este proyecto)                        |
-|---------------------------|----------------------------------------------|
-| AWS Lambda                | Azure Functions v4                           |
-| API Gateway               | HTTP trigger (+ APIM opcional)               |
-| DynamoDB (estado)         | Cosmos DB (serverless, Managed Identity)     |
-| MySQL (persistencia)      | Azure SQL Database (HikariCP)                |
-| SNS (topic)               | Service Bus topic                            |
-| SQS (cola)                | Service Bus subscription                     |
-| EventBridge               | Service Bus topic `appointment-completed`    |
-| Serverless Framework      | Bicep                                        |
-| CloudWatch                | Application Insights + Log Analytics         |
+| AWS (proyecto original) | Azure (este proyecto) |
+|---|---|
+| AWS Lambda | Azure Functions v4 |
+| API Gateway | HTTP trigger (+ APIM opcional) |
+| DynamoDB | Cosmos DB |
+| MySQL / RDS | Azure SQL Database |
+| SNS topic | Service Bus topic |
+| SQS queue | Service Bus subscription |
+| EventBridge | Service Bus topic `appointment-completed` |
+| Serverless Framework | Bicep |
+| CloudWatch | Application Insights + Log Analytics |
 
 ---
 
-## Clean Architecture
+## Arquitectura
+
+Clean Architecture con cuatro capas bien delimitadas:
 
 ```
 src/main/java/com/clinic/
 ├── domain/
-│   ├── entities/   Appointment, AppointmentStatus, CountryISO
-│   └── ports/      AppointmentStateRepository, AppointmentRelationalRepository, AppointmentEventPublisher
+│   ├── entities/        Appointment, AppointmentEvent, AppointmentStatus, CountryISO
+│   ├── ports/           AppointmentStateRepository, AppointmentRelationalRepository,
+│   │                    AppointmentEventPublisher, AppointmentEventStore, AppointmentNotifier
+│   └── shared/          Page<T>
 ├── application/
-│   └── usecases/   CreateAppointmentUseCase, GetAppointmentsUseCase, ProcessAppointmentUseCase
+│   └── usecases/        CreateAppointmentUseCase, GetAppointmentsUseCase,
+│                        ProcessAppointmentUseCase, CancelAppointmentUseCase,
+│                        RescheduleAppointmentUseCase
 ├── infrastructure/
-│   ├── config/     AppContext (composition root, manual DI)
-│   ├── messaging/  ServiceBusEventPublisher (Managed Identity)
-│   └── repos/      CosmosAppointmentStateRepository (Managed Identity)
-│                   AzureSqlAppointmentRepository (HikariCP)
-├── api/
-│   └── functions/  CreateAppointmentHandler (HTTP POST)
-│                   GetAppointmentsHandler   (HTTP GET)
-│                   AppointmentWorkerPE/CL   (Service Bus triggers)
-│                   AppointmentWorkerBase    (lógica compartida de workers)
-└── shared/
-    └── ApiResponse  (helper centralizado de respuestas HTTP)
+│   ├── config/          AppContext (composition root), ResilienceConfig
+│   ├── messaging/       ServiceBusEventPublisher
+│   ├── notifications/   AcsAppointmentNotifier, NoOpAppointmentNotifier
+│   └── repos/           CosmosAppointmentStateRepository, CosmosAppointmentEventStore,
+│                        AzureSqlAppointmentRepository
+└── api/
+    └── functions/       HTTP triggers y Service Bus triggers
 ```
 
-El dominio y los casos de uso **no conocen Azure**: dependen solo de los puertos.
-Por eso los tests corren sin nube, con fakes en memoria.
+**Regla de dependencias:** `api` / `infrastructure` → `application` → `domain`  
+El dominio no importa ninguna clase de Azure. Los tests corren completamente en memoria, sin nube.
 
 ---
 
@@ -56,141 +79,75 @@ Por eso los tests corren sin nube, con fakes en memoria.
 
 ```
 POST /api/appointments
-  → CreateAppointmentHandler
-    → CreateAppointmentUseCase
-      → CosmosDB (PENDING)
-      → ServiceBus topic "appointment-created" (subject = countryISO)
-        → pe-worker / cl-worker subscription
+  → CreateAppointmentUseCase
+      → Cosmos DB (estado PENDING) + evento APPOINTMENT_CREATED
+      → Service Bus topic "appointment-created"
           → AppointmentWorkerPE / AppointmentWorkerCL
-            → ProcessAppointmentUseCase
-              → CosmosDB (COMPLETED)
-              → Azure SQL (persistencia final)
-              → ServiceBus topic "appointment-completed"
+              → ProcessAppointmentUseCase
+                  → Cosmos DB (COMPLETED) + evento APPOINTMENT_COMPLETED
+                  → Azure SQL (persistencia final)
+                  → ACS Email (notificación al asegurado)
+                  → Service Bus topic "appointment-completed"
 
-GET /api/appointments/{insuredId}
-  → GetAppointmentsHandler
-    → GetAppointmentsUseCase
-      → CosmosDB (query by insuredId)
+DELETE /api/appointments/{id}   → CancelAppointmentUseCase  → CANCELLED
+PATCH  /api/appointments/{id}/reschedule → RescheduleAppointmentUseCase → RESCHEDULED + nueva cita
+GET    /api/appointments/{id}/history    → log de eventos inmutables desde Cosmos DB
 ```
 
 ---
 
-## Seguridad
+## Ejecutar localmente
 
-| Recurso       | Autenticación                                       |
-|---------------|-----------------------------------------------------|
-| Cosmos DB     | Managed Identity (CosmosDBDataContributor role)     |
-| Service Bus   | Managed Identity (ServiceBusDataOwner role)         |
-| Azure SQL     | Usuario/contraseña; password en Key Vault (KV ref)  |
-| Function App  | SystemAssigned identity; HTTPS-only; TLS 1.2 mín.   |
+Requiere [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local) y una cuenta de Cosmos DB o el emulador.
 
----
+```bash
+# 1. Compilar
+mvn clean package
 
-## Variables de entorno
+# 2. Configurar variables (copia y edita)
+cp local.settings.json.example local.settings.json
 
-| Variable                              | Descripción                                          |
-|---------------------------------------|------------------------------------------------------|
-| `COSMOS_ENDPOINT`                     | URI del Cosmos DB account                            |
-| `COSMOS_DATABASE`                     | Nombre de la base de datos (default: `clinicdb`)     |
-| `COSMOS_CONTAINER`                    | Nombre del contenedor (default: `appointments`)      |
-| `SERVICEBUS__fullyQualifiedNamespace` | FQNS del namespace (`<ns>.servicebus.windows.net`)   |
-| `SERVICEBUS_CREATED_TOPIC`            | Nombre del topic de creación                         |
-| `SERVICEBUS_COMPLETED_TOPIC`          | Nombre del topic de completado                       |
-| `SQL_HOST`                            | Host del servidor Azure SQL                          |
-| `SQL_DATABASE`                        | Nombre de la base de datos SQL                       |
-| `SQL_AUTHENTICATION`                  | `SqlPassword` o `ActiveDirectoryManagedIdentity`     |
-| `SQL_USER`                            | Usuario administrador SQL                            |
-| `SQL_PASSWORD`                        | Contraseña (Key Vault reference en producción)       |
-| `ACS_ENDPOINT`                        | URI del recurso Azure Communication Services (opcional; si ausente, notificaciones deshabilitadas) |
-| `ACS_SENDER_ADDRESS`                  | Dirección de email verificada para envío (ej. `DoNotReply@<domain>.azurecomm.net`) |
-| `COSMOS_EVENTS_CONTAINER`             | Nombre del contenedor de eventos (default: `appointment-events`)                   |
+# 3. Iniciar
+mvn azure-functions:run
+```
+
+La función queda disponible en `http://localhost:7071/api`.
+
+Para ejecutar solo los tests (sin nube, sin variables de entorno):
+
+```bash
+mvn clean verify
+```
 
 ---
 
 ## Despliegue
 
-```bash
-# 1. Infra (incluye Key Vault, roles de Managed Identity, SQL, Cosmos, Service Bus)
-az deployment sub create \
-  --location eastus \
-  --template-file infra/main.bicep \
-  --parameters infra/main.parameters.json \
-  --parameters sqlAdminPassword='<password>' \
-  --name clinic-dev
+El deploy es **exclusivamente manual** vía GitHub Actions (`workflow_dispatch`). El CI nunca aprovisiona recursos Azure.
 
-# 2. Build y publicación
-mvn clean package
-mvn azure-functions:deploy
+```
+.github/workflows/
+├── ci.yml          Push/PR → build, tests, validación OpenAPI   (sin costo Azure)
+├── deploy.yml      Manual  → infra Bicep + Function App         (genera costo)
+├── destroy.yml     Manual  → elimina el resource group          (detiene costo)
+└── integration.yml Manual  → tests Postman contra entorno vivo
 ```
 
----
-
-## Pruebas
-
-```bash
-# Ejecutar tests y verificar cobertura (gate: 80% en domain + application)
-mvn clean verify
-
-# POST — crear cita
-curl -X POST https://<function-app>.azurewebsites.net/api/appointments \
-  -H "Content-Type: application/json" \
-  -d '{"insuredId":"12345","scheduleId":10,"countryISO":"PE"}'
-# -> {"appointmentId":"...","message":"Appointment received","status":"pending"}
-
-# GET — consultar citas de un asegurado
-curl https://<function-app>.azurewebsites.net/api/appointments/12345
-```
+Para desplegar en Azure es necesario configurar las variables OIDC del entorno (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`) y el secret `SQL_ADMIN_PASSWORD` en el repositorio.
 
 ---
 
-## Mejoras respecto al original (AWS)
+## Endpoints
 
-- `appointmentId` generado con UUID en el caso de uso (no lo recibe el cliente).
-- Invariante de negocio: una cita solo se completa desde PENDING (idempotencia).
-- Dead-letter queue configurada desde el IaC (`maxDeliveryCount: 5`).
-- Validación de entrada en el borde (handler) antes de tocar el dominio.
-- Managed Identity para Cosmos y Service Bus — sin secretos en configuración.
-- Key Vault reference para SQL password — nunca visible en portal ni en código.
-- HikariCP — pool de conexiones SQL (reutilizado entre invocaciones warm).
-- Workers PE/CL sin duplicación — `AppointmentWorkerBase` centraliza la lógica.
-- Cobertura de tests con JaCoCo (gate 80% en domain/application).
-- CI/CD con GitHub Actions en cada push a `master` o `main`.
+Base path: `/api`
 
----
+| Método | Ruta | Descripción |
+|---|---|---|
+| `POST` | `/appointments` | Crear cita (PENDING → Service Bus) |
+| `GET` | `/appointments/{insuredId}` | Listar citas paginadas (cursor-based) |
+| `DELETE` | `/appointments/{appointmentId}` | Cancelar cita PENDING |
+| `PATCH` | `/appointments/{appointmentId}/reschedule` | Reagendar cita PENDING |
+| `GET` | `/appointments/{appointmentId}/history` | Log de eventos de una cita |
+| `GET` | `/health` | Estado de Cosmos DB, SQL y Service Bus |
 
-## Future Improvements
-
-Ruta incremental, ordenada de menor a mayor complejidad, para evolucionar el proyecto como pieza de portafolio:
-
-| Estado | Mejora | Objetivo |
-|--------|--------|----------|
-| Done | Documentar roadmap de mejoras futuras | Mostrar direccion tecnica clara en el portafolio. |
-| Done | CI con build, tests y validacion OpenAPI | Garantizar que cada push compile, ejecute pruebas y valide el contrato HTTP. |
-| Done | Publicar `openapi.yaml` como artifact de CI | Facilitar revision externa del contrato de API desde GitHub Actions. |
-| Done | Observabilidad estructurada | Agregar correlation IDs, logs consistentes y metricas por flujo de cita. |
-| Done | Manejo avanzado de retries y dead-letter | Documentar y exponer operacion de fallos de Service Bus. |
-| Done | API Management opcional | Agregar una fachada APIM activable para gobierno de API. |
-| Done | Managed Identity para Azure SQL | Adaptador JDBC listo para `ActiveDirectoryManagedIdentity`; requiere crear usuario contenido en la base. |
-| Done | Soporte escalable para mas paises | Centralizar paises soportados en el dominio para evitar validaciones hardcodeadas. |
-| Done | Pruebas de integracion cloud/local | Workflow manual con Newman contra Function App o APIM desplegado. |
-| Done | Load testing y performance baselines | Medir cold starts, throughput de Service Bus y uso del pool SQL. |
-| Done | Health check endpoint `/api/health` | Verificar conectividad con Cosmos DB, Service Bus y SQL antes de reportar estado; buena practica operativa basica. |
-| Done | Pagination con cursor en `GET /appointments` | Usar el continuation token nativo de Cosmos DB para soportar asegurados con muchas citas sin cargar todo en memoria. |
-| Done | Casos de uso de cancelacion y reagendado | Agregar `CancelAppointmentUseCase` y `RescheduleAppointmentUseCase` con sus puertos; demuestra que el dominio evoluciona sin tocar infraestructura. |
-| Done | Circuit breaker y retry exponencial con Resilience4j | Envolver adaptadores de Cosmos DB y SQL con politica de reintentos y circuit breaker para mayor resiliencia ante fallos transitorios. |
-| Done | Notificaciones con Azure Communication Services | Enviar confirmacion al asegurado cuando su cita es completada; introduce un nuevo puerto de notificacion en el dominio sin acoplarlo a ACS. |
-| Done | Event sourcing ligero en Cosmos DB | Guardar cada cambio de estado como un documento de evento (`AppointmentCreated`, `AppointmentCompleted`, `AppointmentCancelled`) para auditar el ciclo de vida completo de una cita. |
-
----
-
-## Portfolio Enhancements
-
-| Estado | Mejora | Referencia |
-|--------|--------|------------|
-| Done | Deploy manual por GitHub Actions con OIDC | `.github/workflows/deploy.yml` |
-| Done | Ambientes separados `dev`, `test`, `prod` | `infra/parameters.*.json` |
-| Done | APIM con throttling y JWT opcional | `infra/core.bicep`, `docs/deployment.md` |
-| Done | Alertas operativas opcionales | `infra/core.bicep`, `docs/deployment.md` |
-| Done | Workbook de observabilidad | `infra/core.bicep` |
-| Done | Hardening de red parametrizable | `allowPublicNetworkAccess` en Bicep |
-| Done | Guia operativa y de despliegue | `docs/operations.md`, `docs/deployment.md` |
+Contrato completo: [`src/docs/openapi.yaml`](src/docs/openapi.yaml)
