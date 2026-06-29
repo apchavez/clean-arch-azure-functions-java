@@ -1,4 +1,7 @@
 ﻿[![CI](https://github.com/apchavez/clean-arch-azure-functions-java/actions/workflows/ci.yml/badge.svg)](https://github.com/apchavez/clean-arch-azure-functions-java/actions/workflows/ci.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=apchavez_clean-arch-azure-functions-java&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=apchavez_clean-arch-azure-functions-java)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=apchavez_clean-arch-azure-functions-java&metric=coverage)](https://sonarcloud.io/summary/new_code?id=apchavez_clean-arch-azure-functions-java)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=apchavez_clean-arch-azure-functions-java&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=apchavez_clean-arch-azure-functions-java)
 
 # Clinic Scheduling Platform — Azure (Java 21)
 
