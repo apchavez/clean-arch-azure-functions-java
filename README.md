@@ -1,8 +1,8 @@
-[![CI](https://github.com/apchavez/clinic-scheduling-azure/actions/workflows/ci.yml/badge.svg)](https://github.com/apchavez/clinic-scheduling-azure/actions/workflows/ci.yml)
+[![CI](https://github.com/apchavez/clean-arch-azure-functions-java/actions/workflows/ci.yml/badge.svg)](https://github.com/apchavez/clean-arch-azure-functions-java/actions/workflows/ci.yml)
 
 # Clinic Scheduling Platform — Azure (Java 21)
 
-Azure migration of the medical appointment platform originally built on AWS ([clinic-scheduling-platform](https://github.com/apchavez/clinic-scheduling-platform), TypeScript). Same business logic and same Clean Architecture — only the infrastructure adapters change.
+Azure migration of the medical appointment platform originally built on AWS ([clean-arch-aws-lambda-typescript](https://github.com/apchavez/clean-arch-aws-lambda-typescript), TypeScript). Same business logic and same Clean Architecture — only the infrastructure adapters change.
 
 > The domain has no knowledge of Azure. What changes between clouds is exclusively the infrastructure layer; use cases and entities remain intact.
 
@@ -171,5 +171,5 @@ To deploy to Azure, configure the OIDC environment variables (`AZURE_CLIENT_ID`,
 
 | Project | Description |
 |---|---|
-| [clinic-scheduling-platform](https://github.com/apchavez/clinic-scheduling-platform) | The original AWS version — TypeScript, Lambda, DynamoDB, SNS/SQS. Same domain logic, different cloud |
-| [reactive-customer-service](https://github.com/apchavez/reactive-customer-service) | Java 21 reactive REST API with Spring Boot WebFlux and hexagonal architecture |
+| [clean-arch-aws-lambda-typescript](https://github.com/apchavez/clean-arch-aws-lambda-typescript) | The original AWS version — TypeScript, Lambda, DynamoDB, SNS/SQS. Same domain logic, different cloud |
+| [spring-webflux-hexagonal-arch](https://github.com/apchavez/spring-webflux-hexagonal-arch) | Java 21 reactive REST API with Spring Boot WebFlux and hexagonal architecture |
