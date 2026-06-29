@@ -53,6 +53,6 @@ jobs:
 
       - name: SonarCloud analysis
         if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.SONAR_ORGANIZATION != ''
-        run: mvn -B sonar:sonar -Dsonar.host.url=https://sonarcloud.io
+        run: mvn -B sonar:sonar -Dsonar.host.url=https://sonarcloud.io -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }} -Dsonar.projectKey=apchavez_clean-arch-azure-functions-java
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
