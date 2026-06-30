@@ -5,22 +5,26 @@ import com.microsoft.azure.functions.annotation.FixedDelayRetry;
 import com.microsoft.azure.functions.annotation.FunctionName;
 import com.microsoft.azure.functions.annotation.ServiceBusTopicTrigger;
 
-/** CL country worker — triggered by the 'cl-worker' subscription on the 'appointment-created' topic. */
+/**
+ * CL country worker — triggered by the 'cl-worker' subscription on the 'appointment-created' topic.
+ */
 public class AppointmentWorkerCL extends AppointmentWorkerBase {
 
-    @Override
-    protected String country() { return "CL"; }
+  @Override
+  protected String country() {
+    return "CL";
+  }
 
-    @FunctionName("appointmentWorkerCL")
-    @FixedDelayRetry(maxRetryCount = 3, delayInterval = "00:00:10")
-    public void run(
-            @ServiceBusTopicTrigger(
-                    name = "message",
-                    topicName = "appointment-created",
-                    subscriptionName = "cl-worker",
-                    connection = "SERVICEBUS"
-            ) String message,
-            final ExecutionContext context) {
-        process(message, context);
-    }
+  @FunctionName("appointmentWorkerCL")
+  @FixedDelayRetry(maxRetryCount = 3, delayInterval = "00:00:10")
+  public void run(
+      @ServiceBusTopicTrigger(
+              name = "message",
+              topicName = "appointment-created",
+              subscriptionName = "cl-worker",
+              connection = "SERVICEBUS")
+          String message,
+      final ExecutionContext context) {
+    process(message, context);
+  }
 }
