@@ -8,6 +8,7 @@ import com.azure.messaging.servicebus.ServiceBusSenderClient;
 import com.azure.messaging.servicebus.administration.ServiceBusAdministrationClientBuilder;
 import com.clinic.domain.entities.Appointment;
 import com.clinic.domain.ports.AppointmentEventPublisher;
+import com.clinic.infrastructure.config.CorrelationContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -83,17 +84,18 @@ public class ServiceBusEventPublisher implements AppointmentEventPublisher {
     public void publishCreated(Appointment a) {
         resilient(() -> {
             try {
+                String correlationId = correlationId(a);
                 ObjectNode node = MAPPER.createObjectNode()
                         .put("eventType", "APPOINTMENT_CREATED")
                         .put("appointmentId", a.getAppointmentId())
-                        .put("correlationId", a.getAppointmentId())
+                        .put("correlationId", correlationId)
                         .put("insuredId", a.getInsuredId())
                         .put("scheduleId", a.getScheduleId())
                         .put("countryISO", a.getCountryISO().name())
                         .put("occurredAt", Instant.now().toString());
                 ServiceBusMessage message = new ServiceBusMessage(MAPPER.writeValueAsString(node));
                 message.setSubject(a.getCountryISO().name());
-                message.setCorrelationId(a.getAppointmentId());
+                message.setCorrelationId(correlationId);
                 message.getApplicationProperties().put("eventType", "APPOINTMENT_CREATED");
                 message.getApplicationProperties().put("countryISO", a.getCountryISO().name());
                 createdSender.sendMessage(message);
@@ -109,16 +111,17 @@ public class ServiceBusEventPublisher implements AppointmentEventPublisher {
     public void publishCompleted(Appointment a) {
         resilient(() -> {
             try {
+                String correlationId = correlationId(a);
                 ObjectNode node = MAPPER.createObjectNode()
                         .put("eventType", "APPOINTMENT_COMPLETED")
                         .put("appointmentId", a.getAppointmentId())
-                        .put("correlationId", a.getAppointmentId())
+                        .put("correlationId", correlationId)
                         .put("insuredId", a.getInsuredId())
                         .put("countryISO", a.getCountryISO().name())
                         .put("occurredAt", Instant.now().toString());
                 ServiceBusMessage message = new ServiceBusMessage(MAPPER.writeValueAsString(node));
                 message.setSubject(a.getCountryISO().name());
-                message.setCorrelationId(a.getAppointmentId());
+                message.setCorrelationId(correlationId);
                 message.getApplicationProperties().put("eventType", "APPOINTMENT_COMPLETED");
                 message.getApplicationProperties().put("countryISO", a.getCountryISO().name());
                 completedSender.sendMessage(message);
@@ -134,16 +137,17 @@ public class ServiceBusEventPublisher implements AppointmentEventPublisher {
     public void publishCancelled(Appointment a) {
         resilient(() -> {
             try {
+                String correlationId = correlationId(a);
                 ObjectNode node = MAPPER.createObjectNode()
                         .put("eventType", "APPOINTMENT_CANCELLED")
                         .put("appointmentId", a.getAppointmentId())
-                        .put("correlationId", a.getAppointmentId())
+                        .put("correlationId", correlationId)
                         .put("insuredId", a.getInsuredId())
                         .put("countryISO", a.getCountryISO().name())
                         .put("occurredAt", Instant.now().toString());
                 ServiceBusMessage message = new ServiceBusMessage(MAPPER.writeValueAsString(node));
                 message.setSubject(a.getCountryISO().name());
-                message.setCorrelationId(a.getAppointmentId());
+                message.setCorrelationId(correlationId);
                 message.getApplicationProperties().put("eventType", "APPOINTMENT_CANCELLED");
                 message.getApplicationProperties().put("countryISO", a.getCountryISO().name());
                 cancelledSender.sendMessage(message);
@@ -153,6 +157,11 @@ public class ServiceBusEventPublisher implements AppointmentEventPublisher {
                 throw new RuntimeException("Failed to publish APPOINTMENT_CANCELLED event", e);
             }
         });
+    }
+
+    private static String correlationId(Appointment a) {
+        String ctx = CorrelationContext.get();
+        return (ctx != null && !ctx.isBlank()) ? ctx : a.getAppointmentId();
     }
 
     private <T> T resilient(Supplier<T> operation) {

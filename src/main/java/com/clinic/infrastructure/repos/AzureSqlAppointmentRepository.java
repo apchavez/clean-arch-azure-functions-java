@@ -30,6 +30,13 @@ public class AzureSqlAppointmentRepository implements AppointmentRelationalRepos
     private final Retry retry;
     private final CircuitBreaker circuitBreaker;
 
+    AzureSqlAppointmentRepository(HikariDataSource dataSource, Retry retry, CircuitBreaker circuitBreaker) {
+        this.retry = retry;
+        this.circuitBreaker = circuitBreaker;
+        this.dataSource = dataSource;
+        migrateSchema();
+    }
+
     public AzureSqlAppointmentRepository(String host, String database, String authentication,
                                          String user, String password,
                                          Retry retry, CircuitBreaker circuitBreaker) {

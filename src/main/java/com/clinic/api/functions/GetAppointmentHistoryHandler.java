@@ -2,6 +2,7 @@ package com.clinic.api.functions;
 
 import com.clinic.domain.entities.AppointmentEvent;
 import com.clinic.infrastructure.config.AppContext;
+import com.clinic.infrastructure.config.CorrelationContext;
 import com.clinic.shared.ApiResponse;
 import com.microsoft.azure.functions.*;
 import com.microsoft.azure.functions.annotation.AuthorizationLevel;
@@ -34,7 +35,11 @@ public class GetAppointmentHistoryHandler {
             @BindingName("appointmentId") String appointmentId,
             final ExecutionContext context) {
 
+        String correlationId = Optional.ofNullable(request.getHeaders().get("X-Correlation-Id"))
+                .orElse(context.getInvocationId());
+        CorrelationContext.set(correlationId);
         try {
+            log.info("getAppointmentHistory.received appointmentId={} correlationId={}", appointmentId, correlationId);
             if (appointmentId == null || appointmentId.isBlank()) {
                 return ApiResponse.error(request, HttpStatus.BAD_REQUEST,
                         "appointmentId path parameter is required");
@@ -43,14 +48,16 @@ public class GetAppointmentHistoryHandler {
             List<AppointmentEvent> events = AppContext.eventStore()
                     .findByAppointmentId(appointmentId);
 
-            log.info("appointment.history appointmentId={} eventCount={} invocationId={}",
-                    appointmentId, events.size(), context.getInvocationId());
+            log.info("appointment.history appointmentId={} eventCount={} correlationId={}",
+                    appointmentId, events.size(), correlationId);
 
             return ApiResponse.ok(request, events);
         } catch (Exception e) {
-            log.error("Error fetching appointment history: {}", e.getMessage(), e);
+            log.error("Error fetching appointment history: {} correlationId={}", e.getMessage(), correlationId, e);
             return ApiResponse.error(request, HttpStatus.INTERNAL_SERVER_ERROR,
                     "Internal error fetching appointment history");
+        } finally {
+            CorrelationContext.clear();
         }
     }
 }

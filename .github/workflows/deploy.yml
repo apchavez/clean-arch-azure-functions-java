@@ -33,7 +33,7 @@ on:
         description: "Allow public network access to cloud data services"
         required: true
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: read

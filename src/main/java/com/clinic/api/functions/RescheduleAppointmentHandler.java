@@ -2,6 +2,7 @@ package com.clinic.api.functions;
 
 import com.clinic.domain.entities.Appointment;
 import com.clinic.infrastructure.config.AppContext;
+import com.clinic.infrastructure.config.CorrelationContext;
 import com.clinic.shared.ApiResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,7 +42,11 @@ public class RescheduleAppointmentHandler {
             @BindingName("appointmentId") String appointmentId,
             final ExecutionContext context) {
 
+        String correlationId = Optional.ofNullable(request.getHeaders().get("X-Correlation-Id"))
+                .orElse(context.getInvocationId());
+        CorrelationContext.set(correlationId);
         try {
+            log.info("rescheduleAppointment.received appointmentId={} correlationId={}", appointmentId, correlationId);
             if (appointmentId == null || appointmentId.isBlank()) {
                 return ApiResponse.error(request, HttpStatus.BAD_REQUEST,
                         "appointmentId path parameter is required");
@@ -60,9 +65,8 @@ public class RescheduleAppointmentHandler {
 
             Appointment newAppointment = AppContext.rescheduleAppointment().execute(appointmentId, newScheduleId);
 
-            log.info("appointment.rescheduled oldId={} newId={} newScheduleId={} invocationId={}",
-                    appointmentId, newAppointment.getAppointmentId(), newScheduleId,
-                    context.getInvocationId());
+            log.info("appointment.rescheduled oldId={} newId={} newScheduleId={} correlationId={}",
+                    appointmentId, newAppointment.getAppointmentId(), newScheduleId, correlationId);
 
             return ApiResponse.accepted(request, Map.of(
                     "message", "Appointment rescheduled",
@@ -75,9 +79,11 @@ public class RescheduleAppointmentHandler {
             }
             return ApiResponse.error(request, HttpStatus.CONFLICT, msg);
         } catch (Exception e) {
-            log.error("Error rescheduling appointment: {}", e.getMessage(), e);
+            log.error("Error rescheduling appointment: {} correlationId={}", e.getMessage(), correlationId, e);
             return ApiResponse.error(request, HttpStatus.INTERNAL_SERVER_ERROR,
                     "Internal error rescheduling appointment");
+        } finally {
+            CorrelationContext.clear();
         }
     }
 }

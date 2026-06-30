@@ -16,6 +16,7 @@ import com.clinic.infrastructure.repos.CosmosAppointmentStateRepository;
 import com.clinic.shared.HealthStatus;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -25,6 +26,28 @@ import java.util.Map;
  * variables (the Function App's app settings).
  */
 public final class AppContext {
+
+    private static final List<String> REQUIRED_ENV_VARS = List.of(
+            "COSMOS_ENDPOINT",
+            "SERVICEBUS__fullyQualifiedNamespace",
+            "SQL_HOST",
+            "SQL_USER",
+            "SQL_PASSWORD"
+    );
+
+    static {
+        List<String> missing = REQUIRED_ENV_VARS.stream()
+                .filter(name -> {
+                    String val = System.getenv(name);
+                    return val == null || val.isBlank();
+                })
+                .toList();
+        if (!missing.isEmpty()) {
+            throw new IllegalStateException(
+                    "Missing required environment variables: " + missing +
+                    ". Application cannot start.");
+        }
+    }
 
     private static volatile CosmosAppointmentStateRepository stateRepo;
     private static volatile ServiceBusEventPublisher publisher;

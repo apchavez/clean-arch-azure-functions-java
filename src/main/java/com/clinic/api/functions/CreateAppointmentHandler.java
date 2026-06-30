@@ -3,6 +3,7 @@ package com.clinic.api.functions;
 import com.clinic.domain.entities.Appointment;
 import com.clinic.domain.entities.CountryISO;
 import com.clinic.infrastructure.config.AppContext;
+import com.clinic.infrastructure.config.CorrelationContext;
 import com.clinic.shared.ApiResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.azure.functions.*;
@@ -36,7 +37,11 @@ public class CreateAppointmentHandler {
             ) HttpRequestMessage<Optional<String>> request,
             final ExecutionContext context) {
 
+        String correlationId = Optional.ofNullable(request.getHeaders().get("X-Correlation-Id"))
+                .orElse(context.getInvocationId());
+        CorrelationContext.set(correlationId);
         try {
+            log.info("createAppointment.received correlationId={} invocationId={}", correlationId, context.getInvocationId());
             String body = request.getBody().orElse("");
             CreateAppointmentRequest req = MAPPER.readValue(body, CreateAppointmentRequest.class);
 
@@ -51,15 +56,17 @@ public class CreateAppointmentHandler {
 
             Appointment appointment = AppContext.createAppointment()
                     .execute(req.insuredId, req.scheduleId, CountryISO.valueOf(req.countryISO), req.contactEmail);
-            log.info("appointment.accepted appointmentId={} insuredId={} countryISO={} invocationId={}",
+            log.info("appointment.accepted appointmentId={} insuredId={} countryISO={} correlationId={}",
                     appointment.getAppointmentId(), appointment.getInsuredId(),
-                    appointment.getCountryISO().name(), context.getInvocationId());
+                    appointment.getCountryISO().name(), correlationId);
             return ApiResponse.accepted(request, CreateAppointmentResponse.received(appointment.getAppointmentId()));
 
         } catch (Exception e) {
-            log.error("Error creating appointment: {}", e.getMessage(), e);
+            log.error("Error creating appointment: {} correlationId={}", e.getMessage(), correlationId, e);
             return ApiResponse.error(request, HttpStatus.INTERNAL_SERVER_ERROR,
                     "Internal error processing appointment");
+        } finally {
+            CorrelationContext.clear();
         }
     }
 }

@@ -4,6 +4,7 @@ import com.clinic.application.usecases.GetAppointmentsUseCase;
 import com.clinic.domain.shared.Page;
 import com.clinic.domain.entities.Appointment;
 import com.clinic.infrastructure.config.AppContext;
+import com.clinic.infrastructure.config.CorrelationContext;
 import com.clinic.shared.ApiResponse;
 import com.microsoft.azure.functions.*;
 import com.microsoft.azure.functions.annotation.AuthorizationLevel;
@@ -39,7 +40,11 @@ public class GetAppointmentsHandler {
             @BindingName("insuredId") String insuredId,
             final ExecutionContext context) {
 
+        String correlationId = Optional.ofNullable(request.getHeaders().get("X-Correlation-Id"))
+                .orElse(context.getInvocationId());
+        CorrelationContext.set(correlationId);
         try {
+            log.info("getAppointments.received insuredId={} correlationId={}", insuredId, correlationId);
             if (insuredId == null || insuredId.isBlank()) {
                 return ApiResponse.error(request, HttpStatus.BAD_REQUEST,
                         "insuredId path parameter is required");
@@ -51,14 +56,16 @@ public class GetAppointmentsHandler {
 
             Page<Appointment> page = AppContext.getAppointments().byInsured(insuredId, pageSize, cursor);
 
-            log.info("appointments.queried insuredId={} count={} hasNextPage={} invocationId={}",
-                    insuredId, page.items.size(), page.nextCursor != null, context.getInvocationId());
+            log.info("appointments.queried insuredId={} count={} hasNextPage={} correlationId={}",
+                    insuredId, page.items.size(), page.nextCursor != null, correlationId);
 
             return ApiResponse.ok(request, page);
         } catch (Exception e) {
-            log.error("Error querying appointments: {}", e.getMessage(), e);
+            log.error("Error querying appointments: {} correlationId={}", e.getMessage(), correlationId, e);
             return ApiResponse.error(request, HttpStatus.INTERNAL_SERVER_ERROR,
                     "Internal error querying appointments");
+        } finally {
+            CorrelationContext.clear();
         }
     }
 

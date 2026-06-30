@@ -35,6 +35,13 @@ jobs:
           --reporters cli,junit
           --reporter-junit-export newman-results.xml
 
+      - name: Run k6 load tests
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: tests/load/appointments.js
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+
       - name: Upload integration test results
         if: always()
         uses: actions/upload-artifact@v4
