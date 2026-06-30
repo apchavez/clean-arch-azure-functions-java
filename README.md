@@ -124,6 +124,8 @@ mvn clean package
 
 # 2. Configure variables (copy and edit)
 cp local.settings.json.example local.settings.json
+# Fill in COSMOS_ENDPOINT, SERVICEBUS__fullyQualifiedNamespace, SQL_HOST, SQL_USER, SQL_PASSWORD
+# Optionally set APPLICATIONINSIGHTS_CONNECTION_STRING to enable telemetry locally
 
 # 3. Start
 mvn azure-functions:run
@@ -186,6 +188,23 @@ The deploy is **exclusively manual** via GitHub Actions (`workflow_dispatch`). C
 ```
 
 To deploy to Azure, configure the OIDC environment variables (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`) and the `SQL_ADMIN_PASSWORD` secret in the repository.
+
+---
+
+## Observability
+
+| Signal | Implementation |
+|---|---|
+| Structured logging | SLF4J + Logback with `LogstashEncoder` — all handlers emit JSON to stdout, captured automatically by Application Insights |
+| Tracing / correlation | Application Insights Java agent correlates logs, dependencies, and exceptions across invocations |
+| Health check | `GET /api/health` — pings Cosmos DB, Azure SQL, and Service Bus; returns `UP`/`DOWN` per component |
+| Metric alerts | Bicep provisions two Azure Monitor alerts when deployed with `deployAlerts=true` and `alertEmail`: **5xx error rate** (severity 2) and **high latency** (severity 3, avg > 2 s) |
+
+To enable alerts during deploy, pass the parameters to the deploy workflow:
+
+```bash
+gh workflow run deploy.yml -f deployAlerts=true -f alertEmail=you@example.com
+```
 
 ---
 
