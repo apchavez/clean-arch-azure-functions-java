@@ -9,6 +9,8 @@ import com.microsoft.azure.functions.*;
 import com.microsoft.azure.functions.annotation.AuthorizationLevel;
 import com.microsoft.azure.functions.annotation.FunctionName;
 import com.microsoft.azure.functions.annotation.HttpTrigger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Optional;
 
@@ -21,6 +23,7 @@ import java.util.Optional;
  */
 public class CreateAppointmentHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(CreateAppointmentHandler.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @FunctionName("createAppointment")
@@ -48,14 +51,13 @@ public class CreateAppointmentHandler {
 
             Appointment appointment = AppContext.createAppointment()
                     .execute(req.insuredId, req.scheduleId, CountryISO.valueOf(req.countryISO), req.contactEmail);
-            context.getLogger().info(String.format(
-                    "appointment.accepted appointmentId=%s insuredId=%s countryISO=%s invocationId=%s",
+            log.info("appointment.accepted appointmentId={} insuredId={} countryISO={} invocationId={}",
                     appointment.getAppointmentId(), appointment.getInsuredId(),
-                    appointment.getCountryISO().name(), context.getInvocationId()));
+                    appointment.getCountryISO().name(), context.getInvocationId());
             return ApiResponse.accepted(request, CreateAppointmentResponse.received(appointment.getAppointmentId()));
 
         } catch (Exception e) {
-            context.getLogger().severe("Error creating appointment: " + e.getMessage());
+            log.error("Error creating appointment: {}", e.getMessage(), e);
             return ApiResponse.error(request, HttpStatus.INTERNAL_SERVER_ERROR,
                     "Internal error processing appointment");
         }

@@ -7,6 +7,8 @@ import com.microsoft.azure.functions.annotation.AuthorizationLevel;
 import com.microsoft.azure.functions.annotation.BindingName;
 import com.microsoft.azure.functions.annotation.FunctionName;
 import com.microsoft.azure.functions.annotation.HttpTrigger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Optional;
@@ -16,6 +18,8 @@ import java.util.Optional;
  * Cancels a PENDING appointment and publishes an APPOINTMENT_CANCELLED event.
  */
 public class CancelAppointmentHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(CancelAppointmentHandler.class);
 
     @FunctionName("cancelAppointment")
     public HttpResponseMessage run(
@@ -34,9 +38,8 @@ public class CancelAppointmentHandler {
                         "appointmentId path parameter is required");
             }
             AppContext.cancelAppointment().execute(appointmentId);
-            context.getLogger().info(String.format(
-                    "appointment.cancelled appointmentId=%s invocationId=%s",
-                    appointmentId, context.getInvocationId()));
+            log.info("appointment.cancelled appointmentId={} invocationId={}",
+                    appointmentId, context.getInvocationId());
             return ApiResponse.ok(request,
                     Map.of("message", "Appointment cancelled", "appointmentId", appointmentId));
         } catch (IllegalStateException e) {
@@ -46,7 +49,7 @@ public class CancelAppointmentHandler {
             }
             return ApiResponse.error(request, HttpStatus.CONFLICT, msg);
         } catch (Exception e) {
-            context.getLogger().severe("Error cancelling appointment: " + e.getMessage());
+            log.error("Error cancelling appointment: {}", e.getMessage(), e);
             return ApiResponse.error(request, HttpStatus.INTERNAL_SERVER_ERROR,
                     "Internal error cancelling appointment");
         }

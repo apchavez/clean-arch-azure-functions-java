@@ -10,6 +10,8 @@ import com.microsoft.azure.functions.annotation.AuthorizationLevel;
 import com.microsoft.azure.functions.annotation.BindingName;
 import com.microsoft.azure.functions.annotation.FunctionName;
 import com.microsoft.azure.functions.annotation.HttpTrigger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Optional;
@@ -25,6 +27,7 @@ import java.util.Optional;
  */
 public class RescheduleAppointmentHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(RescheduleAppointmentHandler.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @FunctionName("rescheduleAppointment")
@@ -57,10 +60,9 @@ public class RescheduleAppointmentHandler {
 
             Appointment newAppointment = AppContext.rescheduleAppointment().execute(appointmentId, newScheduleId);
 
-            context.getLogger().info(String.format(
-                    "appointment.rescheduled oldId=%s newId=%s newScheduleId=%d invocationId=%s",
+            log.info("appointment.rescheduled oldId={} newId={} newScheduleId={} invocationId={}",
                     appointmentId, newAppointment.getAppointmentId(), newScheduleId,
-                    context.getInvocationId()));
+                    context.getInvocationId());
 
             return ApiResponse.accepted(request, Map.of(
                     "message", "Appointment rescheduled",
@@ -73,7 +75,7 @@ public class RescheduleAppointmentHandler {
             }
             return ApiResponse.error(request, HttpStatus.CONFLICT, msg);
         } catch (Exception e) {
-            context.getLogger().severe("Error rescheduling appointment: " + e.getMessage());
+            log.error("Error rescheduling appointment: {}", e.getMessage(), e);
             return ApiResponse.error(request, HttpStatus.INTERNAL_SERVER_ERROR,
                     "Internal error rescheduling appointment");
         }

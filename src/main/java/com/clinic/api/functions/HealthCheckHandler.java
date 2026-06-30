@@ -7,11 +7,14 @@ import com.microsoft.azure.functions.*;
 import com.microsoft.azure.functions.annotation.AuthorizationLevel;
 import com.microsoft.azure.functions.annotation.FunctionName;
 import com.microsoft.azure.functions.annotation.HttpTrigger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Optional;
 
 public class HealthCheckHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(HealthCheckHandler.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @FunctionName("health")
@@ -34,7 +37,7 @@ public class HealthCheckHandler {
                     .body(MAPPER.writeValueAsString(status))
                     .build();
         } catch (Exception e) {
-            context.getLogger().severe("Health check error: " + e.getMessage());
+            log.error("Health check error: {}", e.getMessage(), e);
             return request.createResponseBuilder(HttpStatus.INTERNAL_SERVER_ERROR)
                     .header("Content-Type", "application/json")
                     .body("{\"error\":\"Health check unavailable\"}")

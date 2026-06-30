@@ -8,6 +8,8 @@ import com.microsoft.azure.functions.annotation.AuthorizationLevel;
 import com.microsoft.azure.functions.annotation.BindingName;
 import com.microsoft.azure.functions.annotation.FunctionName;
 import com.microsoft.azure.functions.annotation.HttpTrigger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Optional;
@@ -18,6 +20,8 @@ import java.util.Optional;
  * transition recorded by the lightweight event sourcing layer.
  */
 public class GetAppointmentHistoryHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GetAppointmentHistoryHandler.class);
 
     @FunctionName("getAppointmentHistory")
     public HttpResponseMessage run(
@@ -39,13 +43,12 @@ public class GetAppointmentHistoryHandler {
             List<AppointmentEvent> events = AppContext.eventStore()
                     .findByAppointmentId(appointmentId);
 
-            context.getLogger().info(String.format(
-                    "appointment.history appointmentId=%s eventCount=%d invocationId=%s",
-                    appointmentId, events.size(), context.getInvocationId()));
+            log.info("appointment.history appointmentId={} eventCount={} invocationId={}",
+                    appointmentId, events.size(), context.getInvocationId());
 
             return ApiResponse.ok(request, events);
         } catch (Exception e) {
-            context.getLogger().severe("Error fetching appointment history: " + e.getMessage());
+            log.error("Error fetching appointment history: {}", e.getMessage(), e);
             return ApiResponse.error(request, HttpStatus.INTERNAL_SERVER_ERROR,
                     "Internal error fetching appointment history");
         }
